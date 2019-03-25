@@ -24,6 +24,7 @@ import org.gradle.platform.base.internal.toolchain.SearchResult;
 import org.gradle.process.internal.ExecActionFactory;
 
 import java.io.File;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,10 +62,15 @@ public class CompilerMetaDataProviderFactory {
 
         @Override
         public SearchResult<T> getCompilerMetaData(File binary, List<String> additionalArgs, List<File> path) {
-            Key key = new Key(binary, additionalArgs, path);
+            return getCompilerMetaData(binary, additionalArgs, path, Collections.emptyMap());
+        }
+
+        @Override
+        public SearchResult<T> getCompilerMetaData(File binary, List<String> additionalArgs, List<File> path, Map<String, String> environmentVariables) {
+            Key key = new Key(binary, additionalArgs, path, environmentVariables);
             SearchResult<T> result = resultMap.get(key);
             if (result == null) {
-                result = delegate.getCompilerMetaData(binary, additionalArgs, path);
+                result = delegate.getCompilerMetaData(binary, additionalArgs, path, environmentVariables);
                 resultMap.put(key, result);
             }
             return result;
@@ -80,22 +86,24 @@ public class CompilerMetaDataProviderFactory {
         final File gccBinary;
         final List<String> args;
         final List<File> path;
+        private final Map<String, String> environmentVariables;
 
-        private Key(File gccBinary, List<String> args, List<File> path) {
+        private Key(File gccBinary, List<String> args, List<File> path, Map<String, String> environmentVariables) {
             this.gccBinary = gccBinary;
             this.args = args;
             this.path = path;
+            this.environmentVariables = environmentVariables;
         }
 
         @Override
         public boolean equals(Object obj) {
             Key other = (Key) obj;
-            return other.gccBinary.equals(gccBinary) && other.args.equals(args) && other.path.equals(path);
+            return other.gccBinary.equals(gccBinary) && other.args.equals(args) && other.path.equals(path) && other.environmentVariables.equals(environmentVariables);
         }
 
         @Override
         public int hashCode() {
-            return gccBinary.hashCode() ^ args.hashCode() ^ path.hashCode();
+            return gccBinary.hashCode() ^ args.hashCode() ^ path.hashCode() ^ environmentVariables.hashCode();
         }
     }
 }

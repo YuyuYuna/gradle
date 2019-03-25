@@ -17,11 +17,13 @@
 package org.gradle.nativeplatform.fixtures;
 
 import com.google.common.base.Joiner;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import org.gradle.api.internal.file.TestFiles;
 import org.gradle.api.specs.Spec;
 import org.gradle.integtests.fixtures.AbstractContextualMultiVersionSpecRunner;
+import org.gradle.integtests.fixtures.executer.GradleExecuter;
 import org.gradle.internal.nativeintegration.ProcessEnvironment;
 import org.gradle.internal.os.OperatingSystem;
 import org.gradle.nativeplatform.fixtures.msvcpp.VisualStudioLocatorTestFixture;
@@ -62,7 +64,7 @@ import static org.gradle.nativeplatform.fixtures.msvcpp.VisualStudioVersion.VISU
 import static org.gradle.nativeplatform.fixtures.msvcpp.VisualStudioVersion.VISUALSTUDIO_2017;
 
 public class AvailableToolChains {
-    private static final Comparator<ToolChainCandidate> LATEST_FIRST = Collections.reverseOrder(new Comparator<ToolChainCandidate>() {
+    private static final Comparator<ToolChainCandidate> LATEST_RELEASED_FIRST = Collections.reverseOrder(new Comparator<ToolChainCandidate>() {
         @Override
         public int compare(ToolChainCandidate toolchain1, ToolChainCandidate toolchain2) {
             return toolchain1.getVersion().compareTo(toolchain2.getVersion());
@@ -149,7 +151,7 @@ public class AvailableToolChains {
             toolChains.add(new UnavailableToolChain(ToolFamily.CLANG));
         }
 
-        toolChains.sort(LATEST_FIRST);
+        toolChains.sort(LATEST_RELEASED_FIRST);
 
         return toolChains;
     }
@@ -183,7 +185,7 @@ public class AvailableToolChains {
             toolChains.add(new UnavailableToolChain(ToolFamily.VISUAL_CPP));
         }
 
-        toolChains.sort(LATEST_FIRST);
+        toolChains.sort(LATEST_RELEASED_FIRST);
 
         return toolChains;
     }
@@ -241,7 +243,7 @@ public class AvailableToolChains {
             toolChains.add(new UnavailableToolChain(ToolFamily.GCC));
         }
 
-        toolChains.sort(LATEST_FIRST);
+        toolChains.sort(LATEST_RELEASED_FIRST);
 
         return toolChains;
     }
@@ -253,19 +255,31 @@ public class AvailableToolChains {
 
         // On Linux, we assume swift is installed into /opt/swift
         File rootSwiftInstall = new File("/opt/swift");
-        File[] candidates = GUtil.elvis(rootSwiftInstall.listFiles(new FileFilter() {
+        File[] swiftCandidates = GUtil.elvis(rootSwiftInstall.listFiles(new FileFilter() {
             @Override
             public boolean accept(File swiftInstall) {
                 return swiftInstall.isDirectory() && !swiftInstall.getName().equals("latest");
             }
         }), new File[0]);
 
-        for (File swiftInstall : candidates) {
+        for (File swiftInstall : swiftCandidates) {
             File swiftc = new File(swiftInstall, "/usr/bin/swiftc");
             SearchResult<SwiftcMetadata> version = versionDeterminer.getCompilerMetaData(swiftc, Collections.<String>emptyList(), Collections.<File>emptyList());
             if (version.isAvailable()) {
                 File binDir = swiftc.getParentFile();
                 toolChains.add(new InstalledSwiftc(binDir, version.getComponent().getVersion()).inPath(binDir, new File("/usr/bin")));
+            }
+        }
+
+        // On macOS, we assume co-located Xcode is installed into /opt/xcode
+        File rootXcodeInstall = new File("/opt/xcode");
+        File[] xcodeCandidates = GUtil.elvis(rootXcodeInstall.listFiles(xcodeInstall -> xcodeInstall.isDirectory()), new File[0]);
+        for (File xcodeInstall : xcodeCandidates) {
+            File swiftc = new File("/usr/bin/swiftc");
+            SearchResult<SwiftcMetadata> version = versionDeterminer.getCompilerMetaData(swiftc, Collections.<String>emptyList(), Collections.<File>emptyList(), ImmutableMap.of("DEVELOPER_DIR", xcodeInstall.getAbsolutePath()));
+            if (version.isAvailable()) {
+                File binDir = swiftc.getParentFile();
+                toolChains.add(new InstalledXcode(xcodeInstall, version.getComponent().getVersion()).inPath(binDir, new File("/usr/bin")));
             }
         }
 
@@ -283,7 +297,7 @@ public class AvailableToolChains {
         if (toolChains.isEmpty()) {
             toolChains.add(new UnavailableToolChain(ToolFamily.SWIFTC));
         } else {
-            toolChains.sort(LATEST_FIRST);
+            toolChains.sort(LATEST_RELEASED_FIRST);
         }
 
         return toolChains;
@@ -463,6 +477,10 @@ public class AvailableToolChains {
 
         public String platformSpecificToolChainConfiguration() {
             return "";
+        }
+
+        public void configureExecuter(GradleExecuter executer) {
+            // Toolchains should be using default configuration
         }
     }
 
@@ -697,7 +715,52 @@ public class AvailableToolChains {
 
         @Override
         public boolean meets(ToolChainRequirement requirement) {
-            return requirement == ToolChainRequirement.SWIFTC || (requirement == ToolChainRequirement.SWIFTC_3 && getVersion().getMajor() == 3) || (requirement == ToolChainRequirement.SWIFTC_4 && getVersion().getMajor() == 4);
+            return requirement == ToolChainRequirement.SWIFTC ||
+                    ((requirement == ToolChainRequirement.SWIFTC_3 || requirement == ToolChainRequirement.SWIFTC_4_OR_OLDER) && getVersion().getMajor() == 3) ||
+                    ((requirement == ToolChainRequirement.SWIFTC_4 || requirement == ToolChainRequirement.SWIFTC_4_OR_OLDER) && getVersion().getMajor() == 4) ||
+                    (requirement == ToolChainRequirement.SWIFTC_5 && getVersion().getMajor() == 5);
+        }
+    }
+
+    public static class InstalledXcode extends InstalledSwiftc {
+        private static final ProcessEnvironment PROCESS_ENVIRONMENT = NativeServicesTestFixture.getInstance().get(ProcessEnvironment.class);
+        private final File xcodeDir;
+        private String originalDeveloperDir;
+
+        public InstalledXcode(File xcodeDir, VersionNumber compilerVersion) {
+            super(new File("/usr/bin"), compilerVersion);
+            this.xcodeDir = xcodeDir;
+        }
+
+        @Override
+        public List<String> getRuntimeEnv() {
+            List<String> result = new ArrayList<>();
+            result.addAll(super.getRuntimeEnv());
+            result.add("DEVELOPER_DIR=" + xcodeDir.getAbsolutePath());
+            return result;
+        }
+
+        @Override
+        public void initialiseEnvironment() {
+            String compilerPath = Joiner.on(File.pathSeparator).join(pathEntries);
+
+            if (compilerPath.length() > 0) {
+                originalDeveloperDir = System.getenv("DEVELOPER_DIR");
+                System.out.println(String.format("Using DEVELOPER_DIR %s", xcodeDir.getAbsolutePath()));
+                PROCESS_ENVIRONMENT.setEnvironmentVariable("DEVELOPER_DIR", xcodeDir.getAbsolutePath());
+            }
+        }
+
+        @Override
+        public void resetEnvironment() {
+            if (originalDeveloperDir != null) {
+                PROCESS_ENVIRONMENT.setEnvironmentVariable("DEVELOPER_DIR", xcodeDir.getAbsolutePath());
+            }
+        }
+
+        @Override
+        public void configureExecuter(GradleExecuter executer) {
+            executer.withEnvironmentVars(ImmutableMap.of("DEVELOPER_DIR", xcodeDir.getAbsolutePath()));
         }
     }
 

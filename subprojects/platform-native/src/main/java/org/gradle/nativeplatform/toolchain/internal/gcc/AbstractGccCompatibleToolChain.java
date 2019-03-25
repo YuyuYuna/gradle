@@ -355,6 +355,11 @@ public abstract class AbstractGccCompatibleToolChain extends ExtendableToolChain
         }
 
         @Override
+        public SearchResult<GccMetadata> getCompilerMetaData(File binary, List<String> additionalArgs, List<File> searchPath, Map<String, String> environmentVariables) {
+            return delegate.getCompilerMetaData(binary, ImmutableList.<String>builder().addAll(compilerProbeArgs).addAll(additionalArgs).build(), searchPath, environmentVariables);
+        }
+
+        @Override
         public CompilerType getCompilerType() {
             return delegate.getCompilerType();
         }

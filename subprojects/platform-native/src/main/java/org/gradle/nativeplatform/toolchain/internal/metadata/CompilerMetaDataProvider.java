@@ -20,10 +20,13 @@ import org.gradle.platform.base.internal.toolchain.SearchResult;
 
 import java.io.File;
 import java.util.List;
+import java.util.Map;
 
 public interface CompilerMetaDataProvider<T extends CompilerMetadata> {
 
     SearchResult<T> getCompilerMetaData(File binary, List<String> additionalArgs, List<File> searchPath);
+
+    SearchResult<T> getCompilerMetaData(File binary, List<String> additionalArgs, List<File> searchPath, Map<String, String> environmentVariables);
 
     CompilerType getCompilerType();
 

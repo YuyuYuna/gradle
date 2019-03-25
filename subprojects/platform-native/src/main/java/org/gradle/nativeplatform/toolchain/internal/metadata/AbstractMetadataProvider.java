@@ -28,7 +28,9 @@ import org.gradle.process.internal.ExecAction;
 import org.gradle.process.internal.ExecActionFactory;
 
 import java.io.File;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 public abstract class AbstractMetadataProvider<T extends CompilerMetadata> implements CompilerMetaDataProvider<T> {
     private final ExecActionFactory execActionFactory;
@@ -39,8 +41,13 @@ public abstract class AbstractMetadataProvider<T extends CompilerMetadata> imple
 
     @Override
     public SearchResult<T> getCompilerMetaData(File binary, List<String> additionalArgs, List<File> path) {
+        return getCompilerMetaData(binary, additionalArgs, path, Collections.emptyMap());
+    }
+
+    @Override
+    public SearchResult<T> getCompilerMetaData(File binary, List<String> additionalArgs, List<File> path, Map<String, String> environmentVariables) {
         List<String> allArgs = ImmutableList.<String>builder().addAll(additionalArgs).addAll(compilerArgs()).build();
-        Pair<String, String> transform = runCompiler(binary, allArgs);
+        Pair<String, String> transform = runCompiler(binary, allArgs, environmentVariables);
         if (transform == null) {
             return new ComponentNotFound<T>(String.format("Could not determine %s metadata: failed to execute %s %s.", getCompilerType().getDescription(), binary.getName(), Joiner.on(' ').join(allArgs)));
         }
@@ -59,11 +66,12 @@ public abstract class AbstractMetadataProvider<T extends CompilerMetadata> imple
 
     protected abstract T parseCompilerOutput(String output, String error, File binary, List<File> path) throws BrokenResultException;
 
-    private Pair<String, String> runCompiler(File gccBinary, List<String> args) {
+    private Pair<String, String> runCompiler(File gccBinary, List<String> args, Map<String, String> environmentVariables) {
         ExecAction exec = execActionFactory.newExecAction();
         exec.executable(gccBinary.getAbsolutePath());
         exec.setWorkingDir(gccBinary.getParentFile());
         exec.args(args);
+        exec.environment(environmentVariables);
         StreamByteBuffer buffer = new StreamByteBuffer();
         StreamByteBuffer errorBuffer = new StreamByteBuffer();
         exec.setStandardOutput(buffer.getOutputStream());
