@@ -50,6 +50,6 @@ class ModuleMetadataCacheEntry {
     protected ModuleComponentResolveMetadata configure(MutableModuleComponentResolveMetadata input) {
         input.setChanging(isChanging);
         input.setSource(moduleSource);
-        return input.asImmutable();
+        return input.asImmutable().asMutable().asImmutable();
     }
 }
